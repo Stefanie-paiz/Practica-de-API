@@ -1,6 +1,8 @@
 using AuthApi.Interfaces;
 using AuthApi.Repositories;
 using AuthApi.Repositorios;
+using AuthApi.Servicios;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -8,8 +10,7 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Configuración EF Core
+// EF Core
 builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
 {
     var connectionString = builder.Configuration.GetConnectionString("Conn");
@@ -18,12 +19,16 @@ builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
     options.EnableDetailedErrors();
 });
 
-// Inyección
+// DI
 builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
-builder.Services.AddScoped<IAuthService, AuthRepository>();
+builder.Services.AddScoped<IAuthService, AuthRepository>(); // <- mismo namespace que tu clase real
+
+// Categoria (fully-qualified para evitar líos de namespace)
+builder.Services.AddScoped<AuthApi.Interfaces.ICategoriahjRepository, AuthApi.Repositorios.CategoriahjRepository>();
+builder.Services.AddScoped<AuthApi.Interfaces.ICategoriahjService, AuthApi.Servicios.CategoriahjService>();
 
 // JWT
-builder.Services.AddAuthentication("Bearer")
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -34,18 +39,15 @@ builder.Services.AddAuthentication("Bearer")
             ValidateIssuerSigningKey = true,
             ValidIssuer = builder.Configuration["Jwt:Issuer"],
             ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
         };
     });
+
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "AuthService API", Version = "v1" });
-
-    // Configuración JWT
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "Ingrese 'Bearer' seguido de un espacio y su token JWT",
@@ -54,29 +56,23 @@ builder.Services.AddSwaggerGen(c =>
         Type = SecuritySchemeType.ApiKey,
         Scheme = "Bearer"
     });
-
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                },
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" },
                 Scheme = "oauth2",
                 Name = "Bearer",
                 In = ParameterLocation.Header
             },
-            new string[] {}
+            Array.Empty<string>()
         }
     });
 });
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -84,9 +80,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
+app.UseAuthentication();  // <-- crítico
 app.UseAuthorization();
 
 app.MapControllers();
-
 app.Run();
